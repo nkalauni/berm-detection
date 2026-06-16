@@ -1,0 +1,29 @@
+data:
+  dem_dir: data/raw/dem
+  naip_dir: data/raw/naip
+  labels_dir: data/raw/labels
+  processed_dir: data/processed
+  patch_size: 256
+  overlap: 32
+  # DEM-derived input bands fed to the model
+  dem_bands: [elevation, hillshade, slope, aspect]
+
+model:
+  architecture: unet          # unet | d-linknet
+  encoder: resnet34
+  encoder_weights: imagenet
+  in_channels: 8              # 4 NAIP (RGBNIR) + 4 DEM-derived
+  num_classes: 1
+
+training:
+  epochs: 50
+  batch_size: 8
+  lr: 1.0e-4
+  loss: dice_cldice           # dice | cldice | dice_cldice
+  cldice_weight: 0.2
+  optimizer: adamw
+  scheduler: cosine
+
+evaluation:
+  metrics: [iou, f1, precision, recall]
+  iou_threshold: 0.5

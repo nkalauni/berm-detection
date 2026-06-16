@@ -1,0 +1,25 @@
+# Geospatial
+geopandas>=0.14
+rasterio>=1.3
+shapely>=2.0
+pyproj>=3.6
+gdal>=3.6
+
+# Deep learning
+torch>=2.1
+torchvision>=0.16
+segmentation-models-pytorch>=0.3
+
+# Data / training
+numpy>=1.26
+pandas>=2.1
+scikit-learn>=1.3
+albumentations>=1.3
+tqdm>=4.66
+
+# Visualization
+matplotlib>=3.8
+seaborn>=0.13
+
+# Config
+pyyaml>=6.0
