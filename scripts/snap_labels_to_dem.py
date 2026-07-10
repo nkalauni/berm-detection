@@ -33,12 +33,12 @@ warnings.filterwarnings("ignore")
 # ---------------------------------------------------------------------------
 # Tunable parameters (from weekly goals doc)
 # ---------------------------------------------------------------------------
-VERTEX_SPACING_M    = 1.0    # densify interval along each line
-TRANSECT_HALF_WIDTH = 12     # metres each side of vertex to search
+VERTEX_SPACING_M    = 5.0    # densify interval along each line
+TRANSECT_HALF_WIDTH = 6      # metres each side of vertex to search
 TRANSECT_SAMPLES    = 25     # number of points along transect (odd)
 REM_WINDOW_M        = 50     # low-pass window size for REM (metres)
-MAX_SHIFT_M         = 13     # reject snap if proposed shift > this
-PROMINENCE_THRESH   = 0.05   # min REM peak value (m above local mean) to accept snap
+MAX_SHIFT_M         = 5      # reject snap if proposed shift > this
+PROMINENCE_THRESH   = 0.15   # min REM peak value (m above local mean) to accept snap
 SMOOTH_WINDOW       = 5      # moving-average window for post-snap smoothing
 
 # ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ def main():
     # flag for manual review: >50% of vertices could not be snapped
     gdf_out["needs_qc"]   = gdf_out["snap_flags"] > 0.5
 
-    out_path = args.out_dir / labels_path.name
+    out_path = args.out_dir / f"{labels_path.stem}_snapped{labels_path.suffix}"
     gdf_out.to_file(out_path)
 
     # report
