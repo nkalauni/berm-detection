@@ -1,5 +1,17 @@
-# Data — run scripts/download_dem.py to get this
-data/
+# Large rasters — download via scripts/download_dem.py
+data/raw/dem/
+data/raw/naip/
+data/processed/dem/
+
+# Raster formats anywhere under data (catches any future additions)
+data/**/*.tif
+data/**/*.sid
+data/**/*.zip
+data/**/*.aux.xml
+
+# DS_Store files in data
+data/**/.DS_Store
+data/.DS_Store
 
 # Model checkpoints and outputs
 outputs/
