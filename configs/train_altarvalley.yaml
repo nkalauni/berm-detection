@@ -1,0 +1,24 @@
+data:
+  dem_dir: data/raw/dem/altar_valley
+  mask_dir: data/processed/masks/altarvalley_buf2m
+  patch_size: 256
+  val_split: 0.2
+  samples_per_tile: 200
+  pos_fraction: 0.5
+
+model:
+  encoder: resnet34
+  encoder_weights: imagenet
+  in_channels: 4        # elevation, slope, hillshade, aspect
+  num_classes: 1
+
+training:
+  epochs: 50
+  batch_size: 8
+  lr: 1.0e-4
+  loss: bce_dice
+  optimizer: adamw
+  weight_decay: 1.0e-4
+
+output:
+  checkpoint_dir: outputs/checkpoints/altarvalley
