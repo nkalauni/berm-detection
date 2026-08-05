@@ -28,9 +28,17 @@ class BCEDiceLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         valid = targets != 255
-        bce = F.binary_cross_entropy_with_logits(
-            logits[valid], targets[valid].float()
-        )
+        if valid.any():
+            bce = F.binary_cross_entropy_with_logits(
+                logits[valid], targets[valid].float()
+            )
+        else:
+            # An entire batch can legitimately be 100% nodata/ignore for a
+            # small or nodata-heavy region -- binary_cross_entropy_with_logits
+            # on an empty tensor returns NaN (mean of zero elements), which
+            # would silently poison every subsequent gradient step. Fall
+            # back to a zero loss that still participates in autograd.
+            bce = logits.sum() * 0.0
         dice = self.dice(logits, targets)
         return self.bce_weight * bce + self.dice_weight * dice
 

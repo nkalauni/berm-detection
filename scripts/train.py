@@ -1,6 +1,13 @@
 """
 Train the berm detection U-Net.
 
+The set of input channels is entirely a config choice -- see the
+`data.channels` list in the YAML. The model's in_channels and, if using
+ImageNet weights, which channels get the pretrained R/G/B slots
+(first-conv inflation) are both derived automatically from that list.
+Changing how many/which channels a run uses means editing the YAML, not
+this script, dataset.py, or the model.
+
 Usage:
     uv run python scripts/train.py --config configs/train_altarvalley.yaml
     uv run python scripts/train.py --config configs/train_altarvalley.yaml --device mps
@@ -11,13 +18,14 @@ import argparse
 import sys
 from pathlib import Path
 
+import rasterio
 import torch
 import yaml
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.dataset import BermDataset, build_tile_pairs, split_tiles
+from src.data.dataset import BermDataset, split_row_range
 from src.models.unet import build_model
 from src.training.losses import get_loss
 from src.training.trainer import Trainer
@@ -27,7 +35,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--device", type=str, default=None,
-                        help="cuda | mps | cpu (auto-detected if omitted)")
+                        help="cuda | cuda:N | mps | cpu (auto-detected if omitted)")
     parser.add_argument("--resume", type=Path, default=None,
                         help="Path to a checkpoint to resume from")
     args = parser.parse_args()
@@ -46,30 +54,47 @@ def main():
 
     # --- data ---
     data_cfg = cfg["data"]
-    tile_pairs = build_tile_pairs(
-        dem_dir=Path(data_cfg["dem_dir"]),
-        mask_dir=Path(data_cfg["mask_dir"]),
-    )
-    if not tile_pairs:
-        print(f"No (dem, mask) pairs found. Run scripts/rasterize_labels.py first.")
-        sys.exit(1)
-    print(f"Found {len(tile_pairs)} tile pair(s)")
+    stack_path = Path(data_cfg["stack_path"])
+    mask_path = Path(data_cfg["mask_path"])
+    norm_stats_path = Path(data_cfg["norm_stats_path"])
+    channels = data_cfg["channels"]
 
-    train_pairs, val_pairs = split_tiles(
-        tile_pairs, val_split=data_cfg.get("val_split", 0.2)
-    )
-    print(f"Train tiles: {len(train_pairs)}  Val tiles: {len(val_pairs)}")
+    for p, label in [(stack_path, "stack_path"), (mask_path, "mask_path"), (norm_stats_path, "norm_stats_path")]:
+        if not p.exists():
+            print(f"{label} not found: {p}")
+            print("Run scripts/build_feature_stack.py and scripts/rasterize_labels.py first.")
+            sys.exit(1)
+
+    with rasterio.open(stack_path) as src:
+        height = src.height
+    print(f"Channels ({len(channels)}): {channels}")
 
     patch_size = data_cfg.get("patch_size", 256)
-    samples_per_tile = data_cfg.get("samples_per_tile", 200)
-    pos_fraction = data_cfg.get("pos_fraction", 0.5)
+    train_range, val_range = split_row_range(height, val_split=data_cfg.get("val_split", 0.2), patch_size=patch_size)
+    print(f"Train rows: {train_range}  Val rows: {val_range}")
 
-    train_ds = BermDataset(train_pairs, patch_size=patch_size,
-                           augment=True, pos_fraction=pos_fraction,
-                           samples_per_tile=samples_per_tile)
-    val_ds = BermDataset(val_pairs, patch_size=patch_size,
-                         augment=False, pos_fraction=0.0,
-                         samples_per_tile=samples_per_tile)
+    train_ds = BermDataset(
+        stack_path, mask_path, norm_stats_path, channels, train_range,
+        patch_size=patch_size, augment=True,
+        pos_fraction=data_cfg.get("pos_fraction", 0.5),
+        samples_per_epoch=data_cfg.get("samples_per_epoch", 2000),
+    )
+    val_ds = BermDataset(
+        stack_path, mask_path, norm_stats_path, channels, val_range,
+        # NOT pos_fraction=0.0: berms cover ~0.02% of pixels as thin linear
+        # features, so pure-random val crops essentially never contain one,
+        # making tp/fn always 0 and IoU stuck at 0.0 regardless of the model
+        # (found via a hyperparameter sweep where every single config showed
+        # val_iou=0.0000 even as train loss dropped meaningfully). Match
+        # train's oversampling so the val metric is actually informative.
+        patch_size=patch_size, augment=False,
+        pos_fraction=data_cfg.get("val_pos_fraction", data_cfg.get("pos_fraction", 0.5)),
+        samples_per_epoch=data_cfg.get("val_samples_per_epoch", 400),
+    )
+    for name, ds in [("train", train_ds), ("val", val_ds)]:
+        if len(ds._berm_locs) == 0:
+            print(f"WARNING: {name} split has ZERO berm pixels in its row range {ds.row_start, ds.row_end} -- "
+                  f"IoU will be meaningless for this split.")
 
     train_cfg = cfg["training"]
     batch_size = train_cfg.get("batch_size", 8)
@@ -79,7 +104,17 @@ def main():
                             num_workers=4, pin_memory=True)
 
     # --- model ---
-    model = build_model(cfg["model"])
+    model_cfg = dict(cfg["model"])
+    model_cfg["in_channels"] = len(channels)
+    rgb_names = ("red", "green", "blue")
+    if all(c in channels for c in rgb_names):
+        model_cfg["rgb_channel_indices"] = [channels.index(c) for c in rgb_names]
+    else:
+        model_cfg["rgb_channel_indices"] = None
+        if model_cfg.get("encoder_weights"):
+            print("No raw R/G/B in `data.channels` -- ignoring encoder_weights, training encoder from random init.")
+            model_cfg["encoder_weights"] = None
+    model = build_model(model_cfg)
 
     # --- optimizer & scheduler ---
     lr = train_cfg.get("lr", 1e-4)
