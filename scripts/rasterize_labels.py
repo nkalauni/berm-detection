@@ -19,6 +19,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rasterio
 from rasterio.features import rasterize as rio_rasterize
 from rasterio.transform import from_bounds
@@ -39,6 +40,13 @@ DATASETS = {
                                "altarvalley_longberms_snapped_buf{buf}m.shp"),
     "altarvalley_structures": (DEM_BASE / "altar_valley",
                                "altarvalley_structures_snapped_buf{buf}m.shp"),
+    # Union of both Altar Valley label sets -- longberms alone (the
+    # "altarvalley" key above) silently drops the 808 shorter structure
+    # features. Template can be a list: all shapefiles get concatenated
+    # into one GeoDataFrame before rasterizing.
+    "altarvalley_combined":   (DEM_BASE / "altar_valley",
+                               ["altarvalley_longberms_snapped_buf{buf}m.shp",
+                                "altarvalley_structures_snapped_buf{buf}m.shp"]),
     "safford":                (DEM_BASE,
                                "safford_berms_snapped_buf{buf}m.shp"),
     "cochise":                (DEM_BASE,
@@ -137,11 +145,12 @@ def process_dataset(
     dem_dir = dem_dir_override or dem_dir_default
 
     buf_int = int(buffer_m) if buffer_m == int(buffer_m) else buffer_m
-    shp_name = shp_template.format(buf=buf_int)
-    shp_path = BUF_BASE / shp_name
+    templates = shp_template if isinstance(shp_template, list) else [shp_template]
+    shp_paths = [BUF_BASE / t.format(buf=buf_int) for t in templates]
 
-    if not shp_path.exists():
-        print(f"\n[SKIP] Shapefile not found: {shp_path}")
+    missing = [p for p in shp_paths if not p.exists()]
+    if missing:
+        print(f"\n[SKIP] Shapefile(s) not found: {missing}")
         print("       Run scripts/buffer_labels.py first.")
         return {}
 
@@ -150,10 +159,14 @@ def process_dataset(
         return {}
 
     print(f"\nDataset      : {key}")
-    print(f"Shapefile    : {shp_path.name}")
+    print(f"Shapefile(s) : {', '.join(p.name for p in shp_paths)}")
     print(f"DEM dir      : {dem_dir}")
 
-    gdf = gpd.read_file(shp_path)
+    gdfs = [gpd.read_file(p) for p in shp_paths]
+    common_crs = gdfs[0].crs
+    gdf = gpd.GeoDataFrame(
+        pd.concat([g.to_crs(common_crs) for g in gdfs], ignore_index=True), crs=common_crs
+    ) if len(gdfs) > 1 else gdfs[0]
     shp_bounds = tuple(gdf.to_crs("EPSG:26912").total_bounds)  # (xmin,ymin,xmax,ymax)
 
     tiles = sorted(dem_dir.glob("*.tif"))

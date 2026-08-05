@@ -5,7 +5,7 @@
 # for a 4-channel example.
 data:
   stack_path: data/processed/features/altarvalley/stack.tif
-  mask_path: data/processed/masks/altarvalley_buf5m/AltarValleyMerged_mask.tif
+  mask_path: data/processed/masks/altarvalley_combined_buf5m/AltarValleyMerged_mask.tif
   norm_stats_path: data/processed/features/altarvalley/norm_stats.json
   channels:
     - resid15
@@ -47,4 +47,4 @@ training:
   weight_decay: 1.0e-4
 
 output:
-  checkpoint_dir: outputs/checkpoints/altarvalley
+  checkpoint_dir: outputs/checkpoints/altarvalley_combined
