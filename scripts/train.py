@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -141,6 +142,23 @@ def main():
     if args.resume:
         start_epoch = trainer.load_checkpoint(args.resume)
         print(f"Resumed from epoch {start_epoch}, best val IoU: {trainer.best_val_iou:.4f}")
+
+    # Snapshot everything evaluate.py needs to reconstruct this exact run,
+    # so it doesn't depend on the config file being unchanged since training
+    # (and doesn't have to re-derive in_channels/rgb_channel_indices/etc).
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "config_path": str(args.config),
+        "stack_path": str(stack_path),
+        "mask_path": str(mask_path),
+        "norm_stats_path": str(norm_stats_path),
+        "channels": channels,
+        "patch_size": patch_size,
+        "train_range": list(train_range),
+        "val_range": list(val_range),
+        "model_cfg": model_cfg,
+    }
+    (checkpoint_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     history = trainer.fit(train_loader, val_loader, epochs)
     print(f"\nDone. Best val IoU: {trainer.best_val_iou:.4f}")

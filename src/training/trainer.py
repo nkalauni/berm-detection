@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import torch
@@ -41,6 +42,9 @@ class Trainer:
             if is_best:
                 self.best_val_iou = val_metrics["iou"]
             self._save_checkpoint(epoch, val_metrics["iou"], is_best)
+            # written after every epoch (not just at the end) so a crash
+            # mid-run doesn't lose the curve -- eval/plotting scripts read this.
+            (self.checkpoint_dir / "history.json").write_text(json.dumps(history, indent=2))
 
             print(
                 f"Epoch {epoch:3d}/{epochs} | "
