@@ -1,0 +1,126 @@
+# Experiment log — Altar Valley berm detection
+
+Living document. Append new runs to the table below; move detailed
+findings/discussion into the sections underneath. Metrics are always from
+`scripts/evaluate.py` (full non-overlapping tiled inference over the val
+row-range) unless noted otherwise -- the training loop's own reported
+`val_iou` uses `pos_fraction`-oversampled crops and reads much higher than
+true full-coverage performance, so don't use it to compare runs.
+
+## Setup common to all runs below
+
+- Study area: Altar Valley, merged DEM (`data/processed/dem/AltarValleyMerged.tif`)
+- Feature stack: 12 channels (`data/processed/features/altarvalley/stack.tif`) --
+  resid15, resid45, openness, profile_curvature, multidirectional_hillshade,
+  depression_depth, omega, log_flowacc, red, green, blue, savi_anomaly
+- Model: U-Net, ResNet-34 encoder, ImageNet-pretrained first conv inflated
+  onto the red/green/blue channel slots
+- Train/val split: spatial, rows [0:63689] train / [63945:79931] val (80/20
+  by row, on the merged raster -- not a tile list)
+- Hyperparameters: lr=1e-3, batch_size=8, dice loss, AdamW, 50 epochs
+  (picked via `scripts/sweep_hyperparams.py`, see below)
+- Labels: snapped centrelines, buffered N metres each side (see per-run
+  buffer width), rasterized onto the merged DEM's grid
+
+## Results
+
+| Run | Buffer | Labels used | checkpoint_dir | val_iou (train-time, biased) | **Full-eval IoU** | Precision | Recall | F1 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 5m | longberms only | `altarvalley` | 0.3493 (epoch 21) | **0.1168** | 0.137 | 0.443 | 0.209 |
+| 2 | 5m | longberms + structures (combined) | `altarvalley_combined` | 0.3478 (epoch 50-ish) | **0.1772** | 0.222 | 0.469 | 0.301 |
+| 3 | 2m | longberms + structures | `altarvalley_combined_buf2m` | _pending_ | _pending_ | | | |
+| 4 | 10m | longberms + structures | `altarvalley_combined_buf10m` | _pending_ | _pending_ | | | |
+
+All metrics at decision threshold 0.5. See each run's
+`outputs/checkpoints/<checkpoint_dir>/eval_val/metrics.json` for the full
+threshold sweep and `.../diagnostics/` for figures.
+
+## Key findings so far
+
+### 1. Training's own val metric is misleading -- always use scripts/evaluate.py
+Run 1's training loop reported val_iou=0.3493, but full-coverage evaluation
+over the whole val region gave 0.1168. Training's validation set uses
+`pos_fraction=0.5` (oversampled toward berm-containing crops) so it never
+really tested how often the model false-positives across the much larger
+berm-free majority of the landscape. Real precision was only 0.137 at
+threshold 0.5.
+
+### 2. The longberms-only mask (run 1) was missing 808 real labeled features
+`rasterize_labels.py`'s `"altarvalley"` dataset key only ever pointed at
+`altarvalley_longberms_snapped_buf{buf}m.shp`; the structures shapefile
+was buffered but never rasterized into the mask actually used for training.
+Combining them (run 2, `"altarvalley_combined"` key) raised full-eval IoU
+0.1168 -> 0.1772 and precision 0.137 -> 0.222, recall held ~flat (~0.47).
+Real improvement, but not the dominant effect (see #4).
+
+### 3. Channel sensitivity is reproducible across runs, and doesn't match the original design
+Zeroing each channel at inference and measuring the IoU drop (200
+berm-centered val tiles), for both run 1 and run 2:
+
+| Channel | Run 1 drop | Run 2 drop |
+|---|---|---|
+| resid45 | +0.1193 | **+0.1741** |
+| profile_curvature | +0.0906 | +0.1559 |
+| log_flowacc | +0.0526 | +0.0462 |
+| depression_depth | -0.0012 | +0.0391 |
+| multidirectional_hillshade | +0.0337 | +0.0111 |
+| openness | +0.0320 | +0.0306 |
+| resid15 | +0.0017 | +0.0123 |
+| blue | -0.0042 | +0.0120 |
+| green | +0.0090 | +0.0117 |
+| red | +0.0086 | +0.0076 |
+| omega | -0.0003 | +0.0062 |
+| savi_anomaly | -0.0054 | +0.0048 |
+
+`resid45` and `profile_curvature` dominate in both runs by a wide margin.
+The originally-planned "4-channel core" (resid15, openness, omega,
+savi_anomaly -- picked a priori as "where most of the performance lives")
+shows near-zero sensitivity in the actual trained model. Worth an explicit
+ablation run: does dropping omega/savi_anomaly/depression_depth (near-zero
+in both runs) hurt at all, or can the channel count be cut without losing
+performance?
+
+### 4. The dominant remaining problem is false positives spread across ~the whole landscape, not concentrated failures near real berms
+The per-1024px-block IoU heatmap is red (IoU~0) across nearly the entire
+study area in both runs, including blocks with zero ground-truth berm
+density -- meaning the model predicts *some* positive pixels almost
+everywhere, not just near mislabeled/missed real berms.
+
+Tested the "labels are just incomplete" hypothesis directly: computed
+distance from every pixel to the nearest real labeled berm, compared for
+false-positive vs. true-negative (background) pixels (run 2, val region):
+
+| | FP pixels | TN (background) pixels |
+|---|---|---|
+| Median distance to nearest real berm | 949m | 3266m |
+| % within 20m of a real berm | 8.0% | 0.2% (40x less) |
+
+Partial support for under-labeling (40x enrichment within a tight 20m
+radius -- some false positives probably are real missed berms right at
+the edge of known networks), but not the whole story: the bulk of the FP
+distribution sits far (median ~950m, 75th %ile ~3.7km) from any real
+label, more consistent with the model over-firing on a generic
+convex-ridge-at-45m-scale shape (exactly the channel it relies on most)
+wherever similar terrain occurs, not specifically near berms.
+
+The false-positive gallery (`diagnostics/fp_gallery.png`) shows concrete
+examples: several flagged false positives trace clean, distinct linear
+ridge features with nothing labeled there at all (plausible unlabeled
+berms, worth a QC pass), and at least one clear road (the berm-vs-road
+confusion the flow-orthogonality channel was originally meant to prevent --
+worth checking whether Omega is actually being computed/used effectively
+given its near-zero sensitivity score above).
+
+## Open questions / next steps
+
+- [ ] Buffer width comparison (runs 3, 4) -- does a wider/narrower mask
+      change precision/recall tradeoff or the false-positive pattern?
+- [ ] Spot-check the near-real-berm false positives (<20m, the most
+      actionable slice from finding #4) against source imagery/QGIS --
+      candidates for adding to the label set.
+- [ ] Try dropping omega/savi_anomaly/depression_depth (consistently
+      near-zero sensitivity) -- does a leaner model do as well?
+- [ ] The training-time val_iou curve is noisy throughout all 50 epochs
+      (bounces 0.20-0.35), not a clean rise-then-plateau -- likely metric
+      variance from `val_samples_per_epoch=400` under severe class
+      imbalance, worth a larger val sample count to check.
