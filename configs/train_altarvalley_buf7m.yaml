@@ -1,0 +1,50 @@
+# Full 12-channel plan. in_channels and (if using ImageNet weights) the
+# RGB first-conv inflation are derived automatically from `channels` below --
+# to run with a different channel count/selection, edit this list, don't
+# touch train.py/dataset.py/unet.py. See configs/train_altarvalley_core4.yaml
+# for a 4-channel example.
+data:
+  stack_path: data/processed/features/altarvalley/stack.tif
+  mask_path: data/processed/masks/altarvalley_combined_buf7m/AltarValleyMerged_mask.tif
+  norm_stats_path: data/processed/features/altarvalley/norm_stats.json
+  channels:
+    - resid15
+    - resid45
+    - openness
+    - profile_curvature
+    - multidirectional_hillshade
+    - depression_depth
+    - omega
+    - log_flowacc
+    - red
+    - green
+    - blue
+    - savi_anomaly
+  patch_size: 256
+  val_split: 0.2
+  samples_per_epoch: 2000
+  val_samples_per_epoch: 400
+  pos_fraction: 0.5
+
+model:
+  encoder: resnet34
+  # Only used if `channels` above includes red, green, and blue -- otherwise
+  # train.py ignores this and trains the encoder from random init, since
+  # ImageNet pretraining doesn't transfer meaningfully without real RGB.
+  encoder_weights: imagenet
+  num_classes: 1
+
+# lr/batch_size/loss chosen via scripts/sweep_hyperparams.py (12 configs x 8
+# epochs on rows 58000:70000, the highest berm-density region for a quick
+# scan): lr=1e-3, batch_size=8, dice won with val_iou=0.6722 vs the next
+# best 0.6626 (bce_dice) -- see outputs/sweep/results.csv for the full grid.
+training:
+  epochs: 50
+  batch_size: 8
+  lr: 1.0e-3
+  loss: dice
+  optimizer: adamw
+  weight_decay: 1.0e-4
+
+output:
+  checkpoint_dir: outputs/checkpoints/altarvalley_combined_buf7m
