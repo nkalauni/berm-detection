@@ -27,9 +27,9 @@ true full-coverage performance, so don't use it to compare runs.
 | Run | Buffer | Labels used | checkpoint_dir | val_iou (train-time, biased) | **Full-eval IoU** | Precision | Recall | F1 |
 |---|---|---|---|---|---|---|---|---|
 | 1 | 5m | longberms only | `altarvalley` | 0.3493 (epoch 21) | **0.1168** | 0.137 | 0.443 | 0.209 |
-| 2 | 5m | longberms + structures (combined) | `altarvalley_combined` | 0.3478 (epoch 50-ish) | **0.1772** | 0.222 | 0.469 | 0.301 |
-| 3 | 2m | longberms + structures | `altarvalley_combined_buf2m` | _pending_ | _pending_ | | | |
-| 4 | 10m | longberms + structures | `altarvalley_combined_buf10m` | _pending_ | _pending_ | | | |
+| 2 | 5m | longberms + structures (combined) | `altarvalley_combined` | 0.3478 | **0.1772** | 0.222 | 0.469 | 0.301 |
+| 3 | 2m | longberms + structures | `altarvalley_combined_buf2m` | 0.3013 | **0.1427** | 0.179 | 0.415 | 0.250 |
+| 4 | 10m | longberms + structures | `altarvalley_combined_buf10m` | 0.4270 | **0.1596** | 0.182 | 0.562 | 0.275 |
 
 All metrics at decision threshold 0.5. See each run's
 `outputs/checkpoints/<checkpoint_dir>/eval_val/metrics.json` for the full
@@ -111,10 +111,31 @@ confusion the flow-orthogonality channel was originally meant to prevent --
 worth checking whether Omega is actually being computed/used effectively
 given its near-zero sensitivity score above).
 
+### 5. Buffer width: 5m gives the best IoU/F1; 10m trades precision for recall; 2m is worst
+
+Same hyperparameters, same combined labels, only the buffer width differs
+(runs 2/3/4):
+
+| Buffer | IoU | Precision | Recall | F1 |
+|---|---|---|---|---|
+| 2m | 0.1427 | 0.179 | 0.415 | 0.250 |
+| **5m** | **0.1772** | **0.222** | 0.469 | **0.301** |
+| 10m | 0.1596 | 0.182 | 0.562 | 0.275 |
+
+5m wins on IoU, precision, and F1. 10m gets meaningfully higher recall
+(0.562 vs 0.469) at roughly the same precision as 2m -- makes sense, a
+wider target area is easier to overlap with but doesn't make predictions
+any more accurate, so precision doesn't really improve. 2m is worst on
+every metric: too thin a target for a 1m-resolution model to hit reliably.
+5m looks like the right default; 10m could be worth revisiting if recall
+matters more than precision for a particular downstream use (e.g. a first
+screening pass meant to be reviewed by a person, vs. a fully automated map).
+
 ## Open questions / next steps
 
-- [ ] Buffer width comparison (runs 3, 4) -- does a wider/narrower mask
-      change precision/recall tradeoff or the false-positive pattern?
+- [x] Buffer width comparison (runs 3, 4) -- 5m wins on IoU/precision/F1,
+      10m trades precision for recall, 2m is worst on everything (see
+      finding #5).
 - [ ] Spot-check the near-real-berm false positives (<20m, the most
       actionable slice from finding #4) against source imagery/QGIS --
       candidates for adding to the label set.
