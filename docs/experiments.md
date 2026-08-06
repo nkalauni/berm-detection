@@ -30,6 +30,11 @@ true full-coverage performance, so don't use it to compare runs.
 | 2 | 5m | longberms + structures (combined) | `altarvalley_combined` | 0.3478 | **0.1772** | 0.222 | 0.469 | 0.301 |
 | 3 | 2m | longberms + structures | `altarvalley_combined_buf2m` | 0.3013 | **0.1427** | 0.179 | 0.415 | 0.250 |
 | 4 | 10m | longberms + structures | `altarvalley_combined_buf10m` | 0.4270 | **0.1596** | 0.182 | 0.562 | 0.275 |
+| 5 | 3m | longberms + structures | `altarvalley_combined_buf3m` | 0.3208 | **0.1534** | 0.196 | 0.413 | 0.266 |
+| 6 | 4m | longberms + structures | `altarvalley_combined_buf4m` | 0.3359 | **0.1695** | 0.217 | 0.438 | 0.290 |
+| 7 | 6m | longberms + structures | `altarvalley_combined_buf6m` | 0.4016 | **0.1704** | 0.208 | 0.482 | 0.291 |
+| 8 | 7m | longberms + structures | `altarvalley_combined_buf7m` | 0.3755 | **0.1498** | 0.176 | 0.500 | 0.261 |
+| 9 | 8m | longberms + structures | `altarvalley_combined_buf8m` | 0.3906 | **0.1792** | 0.218 | 0.499 | 0.304 |
 
 All metrics at decision threshold 0.5. See each run's
 `outputs/checkpoints/<checkpoint_dir>/eval_val/metrics.json` for the full
@@ -111,31 +116,41 @@ confusion the flow-orthogonality channel was originally meant to prevent --
 worth checking whether Omega is actually being computed/used effectively
 given its near-zero sensitivity score above).
 
-### 5. Buffer width: 5m gives the best IoU/F1; 10m trades precision for recall; 2m is worst
+### 5. Buffer width: 4m-8m form a plateau clearly ahead of 2-3m; recall keeps climbing out to 10m
 
-Same hyperparameters, same combined labels, only the buffer width differs
-(runs 2/3/4):
+Full sweep, same hyperparameters and combined labels throughout, one run
+per width (single seed, no repeats -- see the noise caveat below):
 
 | Buffer | IoU | Precision | Recall | F1 |
 |---|---|---|---|---|
 | 2m | 0.1427 | 0.179 | 0.415 | 0.250 |
-| **5m** | **0.1772** | **0.222** | 0.469 | **0.301** |
+| 3m | 0.1534 | 0.196 | 0.413 | 0.266 |
+| 4m | 0.1695 | 0.217 | 0.438 | 0.290 |
+| 5m | 0.1772 | 0.222 | 0.469 | 0.301 |
+| 6m | 0.1704 | 0.208 | 0.482 | 0.291 |
+| 7m | 0.1498 | 0.176 | 0.500 | 0.261 |
+| 8m | **0.1792** | 0.218 | 0.499 | **0.304** |
 | 10m | 0.1596 | 0.182 | 0.562 | 0.275 |
 
-5m wins on IoU, precision, and F1. 10m gets meaningfully higher recall
-(0.562 vs 0.469) at roughly the same precision as 2m -- makes sense, a
-wider target area is easier to overlap with but doesn't make predictions
-any more accurate, so precision doesn't really improve. 2m is worst on
-every metric: too thin a target for a 1m-resolution model to hit reliably.
-5m looks like the right default; 10m could be worth revisiting if recall
-matters more than precision for a particular downstream use (e.g. a first
-screening pass meant to be reviewed by a person, vs. a fully automated map).
+8m edges out 5m on IoU/F1 by about 1% -- but that's within the run-to-run
+noise this setup already shows elsewhere (single-seed 50-epoch runs, no
+repeats; recall the training-time val_iou curve bounces 0.20-0.35 across
+epochs of the *same* run). Don't read 8m as "the" optimum. The real
+pattern: **2-3m are clearly worse on every metric** (too thin a target for
+a 1m-resolution model to hit reliably), **4m-8m form a plateau** (IoU
+0.15-0.18, F1 0.26-0.30, no clear winner within it), and **recall keeps
+climbing as the buffer widens** (0.415 at 2m -> 0.562 at 10m) while
+precision stays roughly flat past 4m -- a wider target is easier to
+overlap with, it doesn't make the model's predictions any more accurate.
+5m stays the default; 10m is the one to reach for if a use case values
+recall over precision (e.g. a first-pass screen meant for human review).
 
 ## Open questions / next steps
 
-- [x] Buffer width comparison (runs 3, 4) -- 5m wins on IoU/precision/F1,
-      10m trades precision for recall, 2m is worst on everything (see
-      finding #5).
+- [x] Buffer width comparison, full 2-10m sweep -- 4m-8m plateau, 2-3m
+      clearly worse, recall keeps climbing with width while precision
+      stays flat past 4m (see finding #5). No repeated-seed runs yet, so
+      treat the exact ranking within the 4-8m plateau as noisy.
 - [ ] Spot-check the near-real-berm false positives (<20m, the most
       actionable slice from finding #4) against source imagery/QGIS --
       candidates for adding to the label set.
