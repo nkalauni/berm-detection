@@ -160,3 +160,8 @@ recall over precision (e.g. a first-pass screen meant for human review).
       (bounces 0.20-0.35), not a clean rise-then-plateau -- likely metric
       variance from `val_samples_per_epoch=400` under severe class
       imbalance, worth a larger val sample count to check.
+- [ ] `evaluate.py`'s tiled inference uses a non-overlapping grid
+      (stride = patch_size, see scripts/evaluate.py:tiled_inference) --
+      try overlapping tiles with blending, both as an inference-quality
+      fix (a berm crossing exactly on a tile seam gets no cross-tile
+      context right now) and as another hyperparameter to sweep.
