@@ -410,6 +410,10 @@ def main():
     plot_false_positive_gallery(eval_dir, stack_path, mask_path, manifest["channels"], row_range,
                                  manifest["patch_size"], out_dir / "fp_gallery.png")
 
+    print("Plotting highlight pair (for non-technical summaries)...")
+    plot_highlight_pair(eval_dir, stack_path, mask_path, manifest["channels"], row_range,
+                         manifest["patch_size"], out_dir / "highlight_pair.png")
+
     print("Plotting training curves...")
     plot_training_curves(args.checkpoint_dir, out_dir / "training_curves.png")
 
@@ -422,3 +426,46 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def plot_highlight_pair(
+    eval_dir: Path, stack_path: Path, mask_path: Path, channels: list, row_range: tuple,
+    patch_size: int, out_path: Path,
+):
+    """Two real rows for a non-technical audience: one solid working
+    detection, and one MEDIAN-severity false positive representing the
+    dominant, typical failure mode (widespread false positives, not
+    missed detections -- see docs/experiments.md finding #4) rather than
+    an extreme outlier. Same real pixel data as the other galleries,
+    just distilled to the two rows that tell the actual story."""
+    with rasterio.open(eval_dir / "confusion.tif") as src:
+        conf = src.read(1)
+    with rasterio.open(eval_dir / "predictions.tif") as src:
+        probs = src.read(1)
+
+    patch_iou, patch_berm, patch_fp = _per_patch_stats(conf, patch_size)
+    n_rows, n_cols = patch_iou.shape
+
+    berm_candidates = [(i, j) for i in range(n_rows) for j in range(n_cols) if patch_berm[i, j] > 20]
+    berm_candidates.sort(key=lambda ij: patch_iou[ij] if not np.isnan(patch_iou[ij]) else -1)
+    good = berm_candidates[-1:]
+
+    fp_candidates = [(i, j) for i in range(n_rows) for j in range(n_cols)
+                      if patch_berm[i, j] < 5 and patch_fp[i, j] > 0]
+    fp_candidates.sort(key=lambda ij: patch_fp[ij])
+    typical_fp = fp_candidates[len(fp_candidates) // 2: len(fp_candidates) // 2 + 1]
+
+    rows_to_plot = [
+        ("working example", good),
+        ("typical false positive", typical_fp),
+    ]
+
+    def label_fn(i, j):
+        if (i, j) in good:
+            return f"IoU={patch_iou[i, j]:.2f}"
+        return f"fp_px={int(patch_fp[i, j])}"
+
+    _render_gallery(
+        rows_to_plot, stack_path, mask_path, channels, row_range, patch_size, probs,
+        label_fn=label_fn, out_path=out_path,
+    )
