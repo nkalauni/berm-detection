@@ -165,3 +165,34 @@ recall over precision (e.g. a first-pass screen meant for human review).
       try overlapping tiles with blending, both as an inference-quality
       fix (a berm crossing exactly on a tile seam gets no cross-tile
       context right now) and as another hyperparameter to sweep.
+
+### 6. Road-mask post-filter: tested, doesn't help (negative result, logged so it isn't retried blind)
+
+Hypothesis from the FP gallery (one flagged false positive was clearly a
+road): suppress predictions that overlap a known road, using OpenStreetMap
+`highway=*` ways buffered 5m (`scripts/build_road_mask.py`), applied as a
+post-hoc filter to `altarvalley_combined` (5m buffer) predictions -- no
+retraining, cheapest version of the idea to test first.
+
+| | IoU | Precision | Recall |
+|---|---|---|---|
+| Baseline | 0.1772 | 0.2217 | 0.4687 |
+| Filter: all `highway=*` roads | 0.1627 | 0.2136 | 0.4057 |
+| Filter: maintained roads only (excl. track/path/footway) | 0.1759 | 0.2213 | 0.4615 |
+
+Both variants are flat-to-worse, not better. Why: of the predictions that
+overlap a mapped road, **25-29% are real true positives**, not confusion
+errors -- real berms in this landscape frequently run along or cross
+actual ranch roads/tracks (access roads plausibly follow the same terrain
+features berms are built on), so a hard spatial cutoff throws out about
+as many correct detections as it catches road-confusion false positives.
+
+Doesn't necessarily kill the underlying idea -- the one FP-gallery example
+really was a road, it's just not representative of the broader
+road-adjacent pixel population. Possible reasons a hard filter fails where
+a learned signal might not: OSM road coverage/positional accuracy in this
+remote ranch country may be imprecise; and a soft, learned input (a road-
+proximity channel the model can weigh against other evidence) might
+succeed where a blanket cutoff can't, since it wouldn't need to be right
+100% of the time to help. Data for that (`data/processed/roads/altarvalley/`)
+is already built if this gets revisited as a 13th channel + retrain.

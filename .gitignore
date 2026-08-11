@@ -3,6 +3,9 @@ data/raw/dem/
 data/raw/naip/
 data/processed/dem/
 
+# Re-fetchable external data — download via scripts/build_road_mask.py
+data/processed/roads/*/osm_roads_raw.json
+
 # Raster formats anywhere under data (catches any future additions)
 data/**/*.tif
 data/**/*.sid
