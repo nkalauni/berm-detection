@@ -278,10 +278,43 @@ longer racing the feature-stack rebuild this time:
 | 0.0003 | 8 | dice | 0.5120 |
 
 lr=1e-3 and batch_size=8 are confirmed still best. The loss function
-flips from `dice` to `bce_dice` -- the staleness in finding #7 was real,
-not just theoretical. Switching future runs to `bce_dice`; the
-`altarvalley_combined` (dice) baseline and the buffer-width sweep (all
-dice) should eventually be redone with `bce_dice` for a fully consistent
-comparison, though the centerline-vs-IoU agreement in finding #8 suggests
-the qualitative conclusions (channel reliance, buffer-width plateau,
-widespread-false-positives diagnosis) are unlikely to flip along with it.
+flips from `dice` to `bce_dice` on the sweep's small dense region. Full
+runs below show that flip does NOT hold up on the real landscape -- see
+finding #10.
+
+### 10. dist_to_road (13th channel) x loss function: a 2x2 comparison, full-coverage eval, both yardsticks
+
+Trained all four combinations (12ch/13ch x dice/bce_dice) on the full
+raster, 50 epochs each, evaluated with both metrics at the standard 0.5
+threshold:
+
+| Config | IoU | Precision | Recall | IoU-F1 | Centerline correctness @3m | completeness @3m | Centerline F1 @3m |
+|---|---|---|---|---|---|---|---|
+| 12ch + dice (existing baseline) | **0.177** | **0.222** | 0.469 | **0.301** | **0.205** | 0.428 | **0.277** |
+| 13ch (dist_to_road) + dice | 0.147 | 0.174 | 0.485 | 0.256 | 0.169 | 0.445 | 0.245 |
+| 12ch + bce_dice (sweep's pick) | 0.114 | 0.127 | 0.535 | 0.205 | 0.117 | 0.494 | 0.188 |
+| 13ch (dist_to_road) + bce_dice | 0.161 | 0.197 | 0.466 | 0.277 | 0.185 | 0.430 | 0.258 |
+
+**The sweep's `bce_dice` recommendation does not hold up at the standard
+threshold on either yardstick** -- 12ch+dice beats 12ch+bce_dice on both
+IoU-F1 (0.301 vs 0.205) and centerline-F1 (0.277 vs 0.188). This is the
+same lesson as finding #7/#9 recurring in a new form: the small dense-
+region sweep is a weak predictor of full-landscape ranking, not just of
+absolute magnitude, but of which choice wins at all. `dice` stays the
+loss of record.
+
+`dist_to_road` alone (13ch+dice vs 12ch+dice) is a clear regression on
+both yardsticks. But there's a real interaction with loss: 13ch+bce_dice
+beats 12ch+bce_dice on every column above, and at each config's own
+*best* threshold (not shown in the table), 13ch+bce_dice reaches
+IoU=0.1973 -- the best of all four at optimal threshold, ahead of
+12ch+dice's own best of 0.1819. Not checked yet: centerline metrics at
+each model's best threshold rather than the fixed 0.5 default used above.
+
+**Conclusion: no clean win yet.** `12ch+dice` remains the safer default
+at the standard threshold on both yardsticks. `dist_to_road` shows a real
+but threshold-dependent signal, not a general channel that dice can also
+exploit -- worth another look (repeat-seed runs, checking centerline
+metrics at optimal threshold, a proper sweep that includes the channel
+rather than a single training run each) before adopting it, not a
+one-and-done result either way.
