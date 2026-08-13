@@ -14,59 +14,23 @@ Usage:
 """
 
 import argparse
-import json
-import time
+import sys
 from pathlib import Path
 
-import geopandas as gpd
 import numpy as np
 import rasterio
-import requests
 from pyproj import Transformer
 from rasterio.features import rasterize as rio_rasterize
-from shapely.geometry import LineString
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from utils.osm import query_overpass_highways, ways_to_geodataframe  # noqa: E402
 
 DEM_BASE = Path(__file__).parent.parent / "data" / "processed" / "dem"
 OUT_BASE = Path(__file__).parent.parent / "data" / "processed" / "roads"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 DATASETS = {
     "altarvalley": DEM_BASE / "AltarValleyMerged.tif",
 }
-
-
-def query_overpass(bbox_wgs84: tuple, cache_path: Path) -> dict:
-    if cache_path.exists():
-        print(f"Using cached Overpass response: {cache_path}")
-        return json.loads(cache_path.read_text())
-
-    lon_min, lat_min, lon_max, lat_max = bbox_wgs84
-    query = (
-        "[out:json][timeout:120];\n"
-        f'way["highway"]({lat_min},{lon_min},{lat_max},{lon_max});\n'
-        "out geom;"
-    )
-    print("Querying Overpass API...")
-    t0 = time.time()
-    r = requests.post(OVERPASS_URL, data={"data": query}, timeout=150)
-    r.raise_for_status()
-    data = r.json()
-    print(f"  {len(data['elements'])} ways ({time.time()-t0:.0f}s)")
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(data))
-    return data
-
-
-def ways_to_geodataframe(osm_data: dict) -> gpd.GeoDataFrame:
-    rows = []
-    for el in osm_data["elements"]:
-        if el.get("type") != "way" or "geometry" not in el:
-            continue
-        coords = [(pt["lon"], pt["lat"]) for pt in el["geometry"]]
-        if len(coords) < 2:
-            continue
-        rows.append({"highway": el.get("tags", {}).get("highway", "unknown"), "geometry": LineString(coords)})
-    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
 
 
 def main():
@@ -87,7 +51,7 @@ def main():
 
     out_dir = OUT_BASE / args.dataset
     cache_path = out_dir / "osm_roads_raw.json"
-    osm_data = query_overpass((lon_min, lat_min, lon_max, lat_max), cache_path)
+    osm_data = query_overpass_highways((lon_min, lat_min, lon_max, lat_max), cache_path)
 
     gdf = ways_to_geodataframe(osm_data)
     print(f"Parsed {len(gdf)} road ways, types: {gdf['highway'].value_counts().to_dict()}")

@@ -25,6 +25,16 @@ Optical/NAIP (4):
                      weights transfer meaningfully into the first 3 slots)
     12. savi_anomaly - SAVI minus its ~75m local median background
 
+Optional 13th channel:
+    dist_to_road - distance (metres) to the nearest OpenStreetMap
+                     highway=* centreline. A hard version of this idea
+                     (suppress predictions overlapping a road buffer) was
+                     tested as a post-filter and made things worse, not
+                     better -- see docs/experiments.md finding #6. This is
+                     the soft/learned version: a continuous distance value
+                     the model can weigh against other evidence, instead
+                     of a binary cutoff.
+
 Every step is idempotent (skips recomputation if its output file already
 exists), so re-running after a partial failure or to extend the channel
 list is cheap.
@@ -63,13 +73,16 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from pyproj import Transformer
 from rasterio.enums import Resampling
+from rasterio.features import rasterize as rio_rasterize
 from rasterio.warp import reproject
-from scipy.ndimage import gaussian_filter, median_filter, zoom
+from scipy.ndimage import distance_transform_edt, gaussian_filter, median_filter, zoom
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from utils.flow_orthogonality import flow_orthogonality  # noqa: E402
 from utils.openness import positive_openness_chunked  # noqa: E402
+from utils.osm import query_overpass_highways, ways_to_geodataframe  # noqa: E402
 
 DEM_BASE = Path(__file__).parent.parent / "data" / "processed" / "dem"
 FEATURES_BASE = Path(__file__).parent.parent / "data" / "processed" / "features"
@@ -86,7 +99,13 @@ FULL_12_CHANNELS = [
     "omega", "log_flowacc",
     "red", "green", "blue", "savi_anomaly",
 ]
+# dist_to_road: soft (continuous) road-proximity signal, added after a hard
+# post-filter version of the same idea tested worse than baseline (see
+# docs/experiments.md finding #6) -- a learned channel lets the model weigh
+# road proximity against other evidence instead of a blanket cutoff.
+FULL_CHANNELS = FULL_12_CHANNELS + ["dist_to_road"]
 NAIP_CHANNELS = {"red", "green", "blue", "savi_anomaly"}
+ROADS_BASE = Path(__file__).parent.parent / "data" / "processed" / "roads"
 
 
 def log(msg: str) -> None:
@@ -353,6 +372,39 @@ def compute_savi_anomaly(
     return out_path
 
 
+def compute_dist_to_road(dataset: str, dem_path: Path, work_dir: Path, out_path: Path) -> Path:
+    """Distance (metres) to the nearest OpenStreetMap highway=* centreline,
+    NOT a buffered/binary mask -- lets the model weigh road proximity as
+    continuous evidence rather than a hard cutoff (see FULL_CHANNELS note)."""
+    if out_path.exists():
+        _check(out_path)
+        return out_path
+
+    with rasterio.open(dem_path) as src:
+        transform, width, height, crs = src.transform, src.width, src.height, src.crs
+        dem = src.read(1)
+        bounds = src.bounds
+    valid = dem != NODATA
+
+    to_wgs84 = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    lon_min, lat_min = to_wgs84.transform(bounds.left, bounds.bottom)
+    lon_max, lat_max = to_wgs84.transform(bounds.right, bounds.top)
+    cache_path = ROADS_BASE / dataset / "osm_roads_raw.json"
+    osm_data = query_overpass_highways((lon_min, lat_min, lon_max, lat_max), cache_path)
+
+    gdf = ways_to_geodataframe(osm_data).to_crs(crs)
+    shapes = ((geom, 1) for geom in gdf.geometry if geom is not None and not geom.is_empty)
+    road_lines = rio_rasterize(shapes, out_shape=(height, width), transform=transform, fill=0, dtype=np.uint8)
+
+    t0 = time.time()
+    dist = distance_transform_edt(road_lines == 0).astype(np.float32)  # pixels == metres on this 1m grid
+    log(f"dist_to_road computed ({time.time()-t0:.0f}s)")
+
+    dist[~valid] = NODATA
+    _write_like(dem_path, out_path, dist)
+    return out_path
+
+
 def build_stack(channel_paths: dict, channel_order: list, out_path: Path) -> None:
     ref_profile = rasterio.open(channel_paths[channel_order[0]]).profile
     profile = dict(ref_profile)
@@ -409,7 +461,7 @@ def main():
     parser.add_argument("--naip", type=Path, default=None, help="Path to the NAIP .sid covering this dataset's extent")
     parser.add_argument("--mrsiddecode-bin", type=Path, default=None, help="Path to the mrsiddecode binary (MrSID Decode SDK)")
     parser.add_argument("--device", default="cuda:0", help="torch device for the openness computation")
-    parser.add_argument("--channels", nargs="+", default=FULL_12_CHANNELS, choices=FULL_12_CHANNELS)
+    parser.add_argument("--channels", nargs="+", default=FULL_CHANNELS, choices=FULL_CHANNELS)
     args = parser.parse_args()
 
     dem_path = DATASETS[args.dataset]
@@ -448,6 +500,10 @@ def main():
     if "savi_anomaly" in channels:
         channel_paths["savi_anomaly"] = compute_savi_anomaly(
             dem_path, args.naip, args.mrsiddecode_bin, work_dir, work_dir / "savi_anomaly.tif"
+        )
+    if "dist_to_road" in channels:
+        channel_paths["dist_to_road"] = compute_dist_to_road(
+            args.dataset, dem_path, work_dir, work_dir / "dist_to_road.tif"
         )
 
     out_dir = FEATURES_BASE / args.dataset
