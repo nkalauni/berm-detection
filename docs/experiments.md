@@ -263,3 +263,25 @@ primary yardstick** (3m chosen as a principled default matching plausible
 digitization+snapping positional uncertainty, not swept for best score),
 reported alongside the buffer-mask IoU numbers for continuity with
 earlier results, not as a replacement for them.
+
+### 9. Re-swept hyperparameters against the combined mask -- the loss function choice flips
+
+Re-ran the sweep (finding #7) against the current combined mask, no
+longer racing the feature-stack rebuild this time:
+
+| lr | batch_size | loss | val_iou (sweep region) |
+|---|---|---|---|
+| 0.001 | 8 | **bce_dice** | **0.5697** |
+| 0.001 | 16 | dice | 0.5303 |
+| 0.001 | 16 | bce_dice | 0.5182 |
+| 0.001 | 8 | dice (previous winner) | 0.5180 |
+| 0.0003 | 8 | dice | 0.5120 |
+
+lr=1e-3 and batch_size=8 are confirmed still best. The loss function
+flips from `dice` to `bce_dice` -- the staleness in finding #7 was real,
+not just theoretical. Switching future runs to `bce_dice`; the
+`altarvalley_combined` (dice) baseline and the buffer-width sweep (all
+dice) should eventually be redone with `bce_dice` for a fully consistent
+comparison, though the centerline-vs-IoU agreement in finding #8 suggests
+the qualitative conclusions (channel reliance, buffer-width plateau,
+widespread-false-positives diagnosis) are unlikely to flip along with it.
