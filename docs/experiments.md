@@ -196,3 +196,70 @@ proximity channel the model can weigh against other evidence) might
 succeed where a blanket cutoff can't, since it wouldn't need to be right
 100% of the time to help. Data for that (`data/processed/roads/altarvalley/`)
 is already built if this gets revisited as a 13th channel + retrain.
+
+Follow-up: trying it as a soft `dist_to_road` channel (distance to nearest
+OSM centreline, not a hard cutoff) instead -- see build_feature_stack.py.
+
+### 7. Methodological gap caught: the hyperparameter sweep predates the label fix
+
+Checked commit order after being asked directly whether there could be a
+bug explaining the sweep's much higher val_iou (0.6722) vs. the full
+training runs' (0.35-0.43 same-metric, 0.15-0.18 full-coverage). Two
+things, not one:
+
+1. **Not a bug -- the sweep's region was deliberately the easiest slice
+   available.** It evaluated on rows 58000:70000, the single
+   densest-berm 12000-row window in the whole 79931-row raster (picked on
+   purpose so a fast 8-epoch scan would have enough positives to be
+   informative). The full runs' val set is the raster's actual
+   southernmost 20% -- much larger, representative, far more berm-sparse.
+   This was flagged as a ranking caveat at the time but not stated
+   clearly enough as also explaining the *absolute* gap.
+2. **A real gap, found by checking `git log` order:** `scripts/sweep_hyperparams.py`
+   (and the sweep run that picked lr=1e-3/batch_size=8/dice) predates
+   the missing-structures-labels fix (finding #2). Every full run since
+   has trained on the combined mask; the hyperparameter choice itself was
+   never re-validated against it. Not a code bug (sweep and training
+   share the same Trainer/BermDataset code, no forked logic), but a real
+   staleness -- re-running the sweep against the current combined mask
+   to confirm the choice still holds (see next results entry).
+
+### 8. Centerline-based evaluation (the new yardstick) -- validates the IoU-based findings, doesn't overturn them
+
+Raised concern: the only real ground truth is the digitized (DEM-snapped)
+centerline *line*; the buffered polygon mask is our own derived artifact
+with an arbitrary width baked in, used on *both* sides of the buffer-width
+comparison (building the training target and the evaluation target) --
+circular. `scripts/evaluate_centerline.py` decouples this: skeletonizes
+the model's prediction to a 1px-wide line (so prediction width stops
+mattering entirely), then measures distance to the true centerline
+directly, at several small, principled tolerances (not swept for best
+score) -- the same family as clDice / Mnih & Hinton's relaxed
+road-completeness metric. Reports `correctness` (precision-like, on
+predicted-skeleton pixels), `completeness` (recall-like, on true-line
+pixels), and their harmonic mean `centerline_f1`.
+
+Run against `altarvalley_combined` (5m buffer, the run with buffer-mask
+IoU=0.1772, precision=0.222, recall=0.469, F1=0.301):
+
+| Tolerance | Correctness | Completeness | Centerline F1 |
+|---|---|---|---|
+| 1m | 0.172 | 0.356 | 0.232 |
+| 2m | 0.194 | 0.402 | 0.262 |
+| 3m | 0.205 | 0.428 | 0.277 |
+| 5m | 0.212 | 0.457 | 0.290 |
+| 8m | 0.223 | 0.495 | 0.308 |
+| 10m | 0.228 | 0.513 | 0.316 |
+
+At T=5m these are nearly identical to the buffer-mask precision/recall/F1
+above (0.212/0.457/0.290 vs. 0.222/0.469/0.301). **The circularity concern
+was legitimate to check, but empirically the width-independent metric
+tells the same story as the buffer-based one** -- the buffer-width
+sensitivity findings (#5) and the "model relies on generic terrain shape"
+diagnosis (#3/#4) aren't artifacts of the evaluation methodology.
+
+Going forward: **centerline correctness/completeness/F1 at T=3m is the
+primary yardstick** (3m chosen as a principled default matching plausible
+digitization+snapping positional uncertainty, not swept for best score),
+reported alongside the buffer-mask IoU numbers for continuity with
+earlier results, not as a replacement for them.
