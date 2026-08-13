@@ -1,0 +1,44 @@
+# 13-channel: the 12-channel plan plus dist_to_road (soft road-proximity
+# signal, see docs/experiments.md finding #6/#7 -- a hard road-mask filter
+# made things worse, this lets the model weigh road proximity as
+# continuous evidence instead). Same hyperparameters/labels as
+# train_altarvalley.yaml for a direct before/after comparison.
+data:
+  stack_path: data/processed/features/altarvalley/stack.tif
+  mask_path: data/processed/masks/altarvalley_combined_buf5m/AltarValleyMerged_mask.tif
+  norm_stats_path: data/processed/features/altarvalley/norm_stats.json
+  channels:
+    - resid15
+    - resid45
+    - openness
+    - profile_curvature
+    - multidirectional_hillshade
+    - depression_depth
+    - omega
+    - log_flowacc
+    - red
+    - green
+    - blue
+    - savi_anomaly
+    - dist_to_road
+  patch_size: 256
+  val_split: 0.2
+  samples_per_epoch: 2000
+  val_samples_per_epoch: 400
+  pos_fraction: 0.5
+
+model:
+  encoder: resnet34
+  encoder_weights: imagenet
+  num_classes: 1
+
+training:
+  epochs: 50
+  batch_size: 8
+  lr: 1.0e-3
+  loss: dice
+  optimizer: adamw
+  weight_decay: 1.0e-4
+
+output:
+  checkpoint_dir: outputs/checkpoints/altarvalley_13ch
