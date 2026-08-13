@@ -175,7 +175,7 @@ def main():
     out_profile = dict(stack_profile)
     out_profile.update(count=1, height=row_range[1] - row_range[0], width=width, transform=row_transform)
 
-    pred_profile = dict(out_profile, dtype="float32", nodata=-1.0)
+    pred_profile = dict(out_profile, dtype="float32", nodata=-1.0, bigtiff="YES")
     probs_out = np.where(mask == NODATA_MASK, -1.0, probs).astype(np.float32)
     with rasterio.open(out_dir / "predictions.tif", "w", **pred_profile) as dst:
         dst.write(probs_out, 1)
@@ -188,7 +188,7 @@ def main():
     confusion[valid & (pred_binary == 1) & (t == 1)] = 1  # TP
     confusion[valid & (pred_binary == 1) & (t == 0)] = 2  # FP
     confusion[valid & (pred_binary == 0) & (t == 1)] = 3  # FN
-    conf_profile = dict(out_profile, dtype="uint8", nodata=NODATA_MASK, compress="lzw")
+    conf_profile = dict(out_profile, dtype="uint8", nodata=NODATA_MASK, compress="lzw", bigtiff="YES")
     with rasterio.open(out_dir / "confusion.tif", "w", **conf_profile) as dst:
         dst.write(confusion, 1)
 
