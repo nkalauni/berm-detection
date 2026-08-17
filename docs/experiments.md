@@ -318,3 +318,54 @@ exploit -- worth another look (repeat-seed runs, checking centerline
 metrics at optimal threshold, a proper sweep that includes the channel
 rather than a single training run each) before adopting it, not a
 one-and-done result either way.
+
+### 11. How the snapped label shapefiles are made, and whether they're reproducible
+
+`scripts/snap_labels_to_dem.py` (deterministic, no randomness):
+
+1. Build a Relative Elevation Model: REM = DEM minus a 50m low-pass
+   (uniform) filter, so snapping targets the local ridge, not absolute
+   elevation.
+2. Densify each digitized line's vertices every 5m.
+3. At each vertex, sample the REM along a perpendicular transect (+/-6m,
+   25 samples).
+4. Move the vertex to the local REM peak on that transect -- but only if
+   the peak is >=0.15m above the local median (a real ridge, not noise)
+   and the resulting shift is <=5m; otherwise flag that vertex as
+   unsnapped.
+5. Smooth the snapped line with a 5-point moving average.
+6. Per-feature attributes: `snap_shift` (mean shift in metres, excluding
+   unsnapped vertices), `snap_flags` (fraction of vertices that failed to
+   snap), `needs_qc` (True if `snap_flags` > 0.5 -- majority of the
+   feature's vertices found no clear ridge).
+
+**Verified reproducible by actually re-running it, not just reading the
+code:**
+- `altarvalley_longberms`: re-run output is byte-for-byte identical to the
+  committed `data/raw/labels_snapped/altarvalley_longberms_snapped.shp`
+  (163/163 features, identical geometry, `snap_shift`, `needs_qc`).
+- `altarvalley_structures`: re-running on the *current* raw shapefile
+  (807 features) reproduces exactly 807 snapped features -- but the
+  committed snapped file has **808**. `git log --follow` shows both the
+  raw and snapped structures shapefiles were added in the same single
+  commit, before this summer's work started, so this is a pre-existing
+  (one-feature) provenance gap in the original data commit, not something
+  introduced this summer. Small (~0.1% of features) and unlikely to
+  matter for any result reported above, but logging it precisely rather
+  than leaving it a mystery for whoever looks next.
+
+**QC backlog, not yet reviewed (worth doing before more labeling work):**
+
+| Dataset | Features | `needs_qc` (majority of vertices unsnapped) |
+|---|---|---|
+| altarvalley_longberms | 163 | 73 (44.8%) |
+| altarvalley_structures | 807 | 186 (23.0%) |
+
+Nearly half of longberms features have a majority of vertices that found
+no clear ridge to snap to. These were flagged by the script but, as far as
+this project's history shows, never manually reviewed in QGIS. Given
+finding #4's evidence that some false positives are plausibly unlabeled
+berms, and this evidence that a large fraction of *existing* labels have
+questionable snap quality, both point the same direction: a manual QA/QC
+pass on the labels themselves is likely higher-leverage right now than
+further model changes.
